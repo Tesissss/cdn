@@ -1,108 +1,126 @@
 import express from "express"
-import fetch from "node-fetch"
+import multer from "multer"
 import crypto from "crypto"
+import cors from "cors"
+import fetch from "node-fetch"
 
 const app = express()
-app.use(express.raw({ type: "*/*", limit: "30mb" }))
+const upload = multer({ limits: { fileSize: 30 * 1024 * 1024 } })
 
 const token = process.env.GITHUB_TOKEN
 const repoOwner = "Tesissss"
 const repoName = "files"
 
-function randomMessage() {
-  const arr = ["sylphy", "Uploader"]
-  return arr[Math.floor(Math.random() * arr.length)]
+global.totalRequests = global.totalRequests || 0
+global.startTime = Date.now()
+
+app.use(cors())
+app.use(express.json())
+app.use(express.urlencoded({ extended: true }))
+
+app.use((req, res, next) => {
+  global.totalRequests++
+  next()
+})
+
+function formatUptime(ms) {
+  let sec = Math.floor(ms / 1000)
+  const days = Math.floor(sec / 86400)
+  sec %= 86400
+  const hours = Math.floor(sec / 3600)
+  sec %= 3600
+  const minutes = Math.floor(sec / 60)
+  sec %= 60
+  return `${days} d - ${hours} h - ${minutes} m - ${sec} s`
 }
 
-async function uploadFileToGitHub(folder, filePath, buffer) {
-  const url = `https://api.github.com/repos/${repoOwner}/${repoName}/contents/${folder}/${filePath}`
-  const headers = {
-    Authorization: `token ${token}`,
-    Accept: "application/vnd.github.v3+json"
-  }
-
-  const exist = await fetch(url, { headers })
+async function uploadToGit(name, buffer, folder) {
+  const url = `https://api.github.com/repos/${repoOwner}/${repoName}/contents/${folder}/${name}`
   const content = buffer.toString("base64")
-  const message = randomMessage()
-  const body = exist.ok
-    ? { message, content, sha: (await exist.json()).sha }
-    : { message, content }
-
+  const body = { message: "Upload", content }
   const res = await fetch(url, {
     method: "PUT",
-    headers: { ...headers, "Content-Type": "application/json" },
+    headers: {
+      Authorization: `token ${token}`,
+      Accept: "application/vnd.github.v3+json",
+      "Content-Type": "application/json"
+    },
     body: JSON.stringify(body)
   })
-
-  if (!res.ok) throw new Error(res.statusText)
-
-  return `https://raw.githubusercontent.com/${repoOwner}/${repoName}/main/${folder}/${filePath}`
+  if (!res.ok) return null
+  return `https://raw.githubusercontent.com/${repoOwner}/${repoName}/main/${folder}/${name}`
 }
 
-function detectType(buffer) {
-  const sig = buffer.subarray(0, 4).toString("hex").toUpperCase()
+app.get("/", (req, res) => {
+  res.json({
+    Stratus: "Alive!",
+    creator: "I'm Fz ~",
+    endpoints: {
+      upload: "POST /upload",
+      file: "GET /file",
+      info: "GET /info"
+    }
+  })
+})
 
-  const imageHeaders = [
-    "FFD8FFE0", "FFD8FFE1", "FFD8FFE2",
-    "89504E47",
-    "47494638",
-    "424D",
-    "52494646",
-    "49492A00",
-    "4D4D002A"
-  ]
+app.post("/upload", upload.single("file"), async (req, res) => {
+  if (!req.file) return res.json({ status: false, error: "No file" })
 
-  const videoHeaders = [
-    "00000018", "00000020",
-    "1A45DFA3",
-    "66747970"
-  ]
+  const mime = req.file.mimetype
+  const isImage = mime.startsWith("image/")
+  const isVideo = mime.startsWith("video/")
 
-  if (imageHeaders.some(h => sig.startsWith(h))) return "imagen"
-  if (videoHeaders.some(h => sig.startsWith(h))) return "video"
+  if (!isImage && !isVideo) return res.json({ status: false, error: "Invalid file type" })
 
-  return null
-}
+  const key = crypto.randomBytes(8).toString("hex")
+  const ext = req.file.originalname.split(".").pop()
+  const finalName = `${key}.${ext}`
 
-app.post("/upload", async (req, res) => {
-  try {
-    if (!req.body || !req.body.length) return res.json({ error: "No buffer received" })
-    if (req.body.length > 30 * 1024 * 1024) return res.json({ error: "File too large (30MB max)" })
+  const folder = isVideo ? "video" : "imagen"
 
-    const type = detectType(req.body)
-    if (!type) return res.json({ error: "Unsupported file type" })
+  const uploadedUrl = await uploadToGit(finalName, req.file.buffer, folder)
+  if (!uploadedUrl) return res.json({ status: false, error: "GitHub upload failed" })
 
-    const key = crypto.randomBytes(8).toString("hex")
-    const rawUrl = await uploadFileToGitHub(type, key, req.body)
+  const domain = req.headers.host
 
-    res.json({ status: true, url: rawUrl, key, type })
-  } catch (e) {
-    res.json({ status: false, error: e.message })
-  }
+  res.json({
+    status: true,
+    data: {
+      file_name: finalName,
+      mimetype: mime,
+      url: `https://${domain}/file?key=${finalName}`
+    }
+  })
 })
 
 app.get("/file", async (req, res) => {
-  try {
-    const { key } = req.query
-    if (!key) return res.json({ error: "Missing key" })
+  const key = req.query.key
+  if (!key) return res.json({ status: false, error: "Missing key" })
+  const ext = key.split(".").pop()
+  const folder = ["mp4", "mov", "mkv", "avi"].includes(ext) ? "video" : "imagen"
+  const raw = `https://raw.githubusercontent.com/${repoOwner}/${repoName}/main/${folder}/${key}`
 
-    const possible = [
-      `https://raw.githubusercontent.com/${repoOwner}/${repoName}/main/imagen/${key}`,
-      `https://raw.githubusercontent.com/${repoOwner}/${repoName}/main/video/${key}`
-    ]
+  const githubRes = await fetch(raw)
+  if (!githubRes.ok) return res.json({ status: false, error: "Not found" })
 
-    for (const url of possible) {
-      const r = await fetch(url)
-      if (r.ok) {
-        const buffer = Buffer.from(await r.arrayBuffer())
-        return res.end(buffer)
-      }
-    }
+  const buffer = Buffer.from(await githubRes.arrayBuffer())
 
-    res.status(404).json({ error: "File not found" })
-  } catch (e) {
-    res.json({ error: e.message })
-  }
+  res.set("Content-Type", githubRes.headers.get("content-type") || "application/octet-stream")
+  res.send(buffer)
 })
 
-app.listen(3000, () => console.log("Server online"))
+app.get("/info", (req, res) => {
+  const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress
+  const uptime = formatUptime(Date.now() - global.startTime)
+
+  res.json({
+    status: "online",
+    server_time: new Date(),
+    user_ip: ip,
+    uptime,
+    total_requests: global.totalRequests
+  })
+})
+
+const PORT = process.env.PORT || 3000
+app.listen(PORT)
