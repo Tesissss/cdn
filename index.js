@@ -5,7 +5,7 @@ import crypto from "crypto"
 const app = express()
 app.use(express.raw({ type: "*/*", limit: "30mb" }))
 
-const token = "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"
+const token = process.env.GITHUB_TOKEN
 const repoOwner = "Tesissss"
 const repoName = "files"
 
