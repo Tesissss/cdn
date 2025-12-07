@@ -115,6 +115,7 @@ app.get("/info", (req, res) => {
 
   res.json({
     status: "online",
+    creator: "I'm Fz ~",
     server_time: new Date(),
     user_ip: ip,
     uptime,
