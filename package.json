@@ -4,10 +4,12 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node index.js"
   },
   "dependencies": {
+    "cors": "latest",
     "express": "latest",
-    "node-fetch": "3.x"
+    "multer": "latest",
+    "node-fetch": "latest"
   }
 }
