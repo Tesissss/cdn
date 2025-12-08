@@ -6,12 +6,12 @@ import fetch from "node-fetch"
 
 const app = express()
 const upload = multer({ limits: { fileSize: 30 * 1024 * 1024 } })
+const C = JSON.parse(process.env.CONFIG);
+const token = C.token
+const repoOwner = C.owner
+const repoName = C.repo
 
-const token = process.env.GITHUB_TOKEN
-const repoOwner = "Tesissss"
-const repoName = "files"
-
-global.totalRequests = global.totalRequests || 0
+global.totalR = global.totalReq || 0
 global.startTime = Date.now()
 
 app.use(cors())
@@ -53,8 +53,8 @@ async function uploadToGit(name, buffer, folder) {
 
 app.get("/", (req, res) => {
   res.json({
-    Stratus: "Alive!",
-    creator: "I'm Fz ~",
+    status: "Alive!",
+    creator: C.creator,
     endpoints: {
       upload: "POST /upload",
       file: "GET /file",
@@ -115,13 +115,13 @@ app.get("/info", (req, res) => {
 
   res.json({
     status: "online",
-    creator: "I'm Fz ~",
+    creator: C.creator,
     server_time: new Date(),
     user_ip: ip,
     uptime,
-    total_requests: global.totalRequests
+    total_requests: global.totalReq
   })
 })
 
-const PORT = process.env.PORT || 3000
+const PORT = C.port || 3000
 app.listen(PORT)
